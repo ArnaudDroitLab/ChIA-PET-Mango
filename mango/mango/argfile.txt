@@ -1,0 +1,2 @@
+bowtieref         = bowtie/hg19
+bedtoolsgenome    = human.hg19.genome

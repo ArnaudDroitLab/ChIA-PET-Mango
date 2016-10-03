@@ -124,9 +124,8 @@ then
     
     ~/.local/bin/cutadapt -a ACGCGATATCTTATCTGACT -A AGTCAGATAAGATATCGCGT \
                           --minimum-length 17 --overlap 10 $extraoptions \
-                          -o $cut1 -p $cut2 $fastq1 $fastq2 &
+                          -o $cut1 -p $cut2 $fastq1 $fastq2 1> $prefix/cut/cutadapt.stdout 2> $prefix/cut/cutadapt.stderr
 fi
-wait
 
 
 # Perform alignment #####################################################
@@ -143,38 +142,31 @@ align2=$prefix/alignment/$id2.sam
 for alignout in $align1 $align2
 do
     if [ ! -e $alignout ]
+    then
         fastqid=`basename $alignout .sam`
+
+        # Mango requires sam files to have reads in the exact same order, and to have the 
+        # exact same name. Bowtie somehow mixes up the order (probably because of multithreading).
+        # So we need to resort by query name. To do that and get the right results,
+        # we'll first need to remove the read markers (/1, /2) at the end of the read names.
+        # We'll also need to sort numerically on the very last part of the read name,
+        # because entries ending with, for example, 27892 and 2789 have no guaranteed sort
+        # order under the default parameters.
         gzip -dc $prefix/cut/$fastqid.fastq.gz |
             bowtie/bowtie-1.1.2/bowtie -S -n 2 -l 50 -k 1 --chunkmbs 500 --sam-nohead \
                                    --mapq 40 -m 1 --best --threads 8 --phred33-quals \
                                    $bowtieindex \
-                                   - \
-                                   $alignout &
+                                   - |
+            sed -e 's/\/[12]//' |
+            sort |
+            sort -t: -k 7 -n 1> $alignout 2> $alignout.stderr &
     fi
 done
-wait
-
-# Mango requires sam files to have reads in the exact same order, and to have the 
-# exact same name. Bowtie somehow mixes up the order (probably because of multithreading).
-# So we need to resort by query name. To do that and get the right results,
-# we'll first need to remove the read markers (/1, /2) at the end of the read names.
-# We'll also need to sort numerically on the very last part of the read name,
-# because if entries finish with 27892 and 2789
-#java -jar $PICARD_PATH SortSam I=$align1 O=$align1.sorted SORT_ORDER=queryname &
-#java -jar $PICARD_PATH SortSam I=$align2 O=$align2.sorted SORT_ORDER=queryname &
-sed -i -e 's/\/1//' `pwd`/$align1 &
-sed -i -e 's/\/2//' `pwd`/$align2 &
-wait
-
-sort $align1 | sort -t: -k 7 -n > $align1.sorted &
-sort $align2 | sort -t: -k 7 -n > $align2.sorted &
 wait
 
 # Generate symbolic links for the sam files.
 ln -s `pwd`/$align1.sorted ${prefix}/mango/mango_1.same.sam
 ln -s `pwd`/$align2.sorted ${prefix}/mango/mango_2.same.sam
-
-
                       
 # Run mango #########################################################
 mkdir -p $prefix/mango
@@ -189,23 +181,4 @@ Rscript mango/mango/mango.R --bedtoolspath bedtools/bedtools2/bin/bedtools \
                             --stages 3:5 \
                             --shortreads FALSE \
                             --peakslop 1500 \
-                            --reportallpairs TRUE
-                      
-#for fileR1 in $(ls *_R1.[a-z][a-z].linkerONLYreads.fastq)
-#do
-#	fileR2=$(echo $fileR1 | sed 's/_R1\./_R2\./g')
-#	tmpid1=$(basename $fileR1 .fastq)
-#	tmpid2=$(basename $fileR2 .fastq)
-#
-#	#python fastqCombinePairedEnd.py $fileR1 $fileR2
-#
-#	#cutadapt -a ACGCGATATCTTATCTGACT -A AGTCAGATAAGATATCGCGT --minimum-length 17 --overlap 10 -o $tmpid1.cutadapt.fastq -p $tmpid2.cutadapt.fastq ${fileR1}_pairs_R1.fastq ${fileR2}_pairs_R2.fastq
-#done
-#
-##cat ${prefix}_R1.*.cutadapt.fastq > ${prefix}_1.same.fastq
-##cat ${prefix}_R2.*.cutadapt.fastq > ${prefix}_2.same.fastq
-#
-##Rscript mango/mango/mango.R --fastq1 ${prefix}_1.same.fastq --fastq2 ${prefix}_2.same.fastq --prefix $prefix --bowtieref /is1/commonDatasets/mugqic_space/genomes/species/Homo_sapiens.hg19/Sequence/BowtieIndex/genome --bedtoolsgenome /is1/commonDatasets/mugqic_space/genomes/species/Homo_sapiens.hg19/Sequence/WholeGenomeFasta/genome.fa --chromexclude chrM,chrY --stages 2:5 --shortreads FALSE --peakslop 1500 --reportallpairs TRUE
-#Rscript mango/mango/mango.R --fastq1 ${prefix}_1.same.fastq --fastq2 ${prefix}_2.same.fastq --prefix $prefix --bowtieref /is1/commonDatasets/mugqic_space/genomes/species/Homo_sapiens.hg19/Sequence/BowtieIndex/genome --bedtoolsgenome bedtools/hg19.genome --chrominclude chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22 --stages 4:5 --shortreads FALSE --peakslop 1500 --reportallpairs TRUE --keepempty TRUE --maxlength 1000
-
-
+                            --reportallpairs TRUE > $prefix/mango/mango.stdout 2> $prefix/mango/mango.stderr
