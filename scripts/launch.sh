@@ -154,6 +154,12 @@ do
 done
 wait
 
+# Mango requires sam files to have reads in the exact same order, and to have the 
+# exact same name. Bowtie somehow mixes up the order (probably because of multithreading).
+# So we need to resort by query name. To do that and get the right results,
+# we'll first need to remove the read markers (/1, /2) at the end of the read names.
+# We'll also need to sort numerically on the very last part of the read name,
+# because if entries finish with 27892 and 2789
 #java -jar $PICARD_PATH SortSam I=$align1 O=$align1.sorted SORT_ORDER=queryname &
 #java -jar $PICARD_PATH SortSam I=$align2 O=$align2.sorted SORT_ORDER=queryname &
 sed -i -e 's/\/1//' `pwd`/$align1 &
