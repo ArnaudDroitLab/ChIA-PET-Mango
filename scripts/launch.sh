@@ -8,7 +8,7 @@
 # some arguments don't have a corresponding value to go with it such
 # as in the --default example).
 # note: if this is set to -gt 0 the /etc/hosts part is not recognized ( may be a bug )
-while [[ $# -gt 1 ]]
+while [[ $# -gt 0 ]]
 do
     key="$1"
     
@@ -123,7 +123,7 @@ then
     fi
     
     ~/.local/bin/cutadapt -a ACGCGATATCTTATCTGACT -A AGTCAGATAAGATATCGCGT \
-                          --minimum-length 17 --overlap 10 $extraoptions \
+                          --minimum-length 17 --overlap 10 $extraoptions  --info-file $prefix/cut/cutadapt.infofile \
                           -o $cut1 -p $cut2 $fastq1 $fastq2 1> $prefix/cut/cutadapt.stdout 2> $prefix/cut/cutadapt.stderr
 fi
 
@@ -141,35 +141,55 @@ align1=$prefix/alignment/$id1.sam
 align2=$prefix/alignment/$id2.sam
 for alignout in $align1 $align2
 do
-    if [ ! -e $alignout ]
+    if [ ! -e $alignout.unsorted ]
     then
         fastqid=`basename $alignout .sam`
 
-        # Mango requires sam files to have reads in the exact same order, and to have the 
-        # exact same name. Bowtie somehow mixes up the order (probably because of multithreading).
-        # So we need to resort by query name. To do that and get the right results,
-        # we'll first need to remove the read markers (/1, /2) at the end of the read names.
-        # We'll also need to sort numerically on the very last part of the read name,
-        # because entries ending with, for example, 27892 and 2789 have no guaranteed sort
-        # order under the default parameters.
         gzip -dc $prefix/cut/$fastqid.fastq.gz |
             bowtie/bowtie-1.1.2/bowtie -S -n 2 -l 50 -k 1 --chunkmbs 500 --sam-nohead \
                                    --mapq 40 -m 1 --best --threads 8 --phred33-quals \
                                    $bowtieindex \
-                                   - |
-            sed -e 's/\/[12]//' |
-            sort |
-            sort -t: -k 7 -n 1> $alignout 2> $alignout.stderr &
+                                   - \
+                                   $alignout.unsorted &> $alignout.log &
     fi
 done
 wait
 
-# Generate symbolic links for the sam files.
-ln -s `pwd`/$align1.sorted ${prefix}/mango/mango_1.same.sam
-ln -s `pwd`/$align2.sorted ${prefix}/mango/mango_2.same.sam
-                      
+for alignout in $align1 $align2
+do
+    if [ ! -e $alignout ]
+    then
+        # Mango requires sam files to have reads in the exact same order, and to have the 
+        # exact same name. Bowtie somehow mixes up the order (probably because of multithreading).
+        # So we need to resort by query name. To do that and get the right results,
+        # we'll first need to remove the read markers (/1, /2) at the end of the read names.
+        sed -i -e 's/\/[12]//' $alignout.unsorted &
+    fi
+done
+wait
+
+for alignout in $align1 $align2
+do
+    if [ ! -e $alignout ]
+    then
+        # We'll also need to sort numerically on the very last part of the read name,
+        # because entries ending with, for example, 27892 and 2789 have no guaranteed sort
+        # order under the default parameters.
+        sort -t: -k 1,6d -k 7,7n $alignout.unsorted > $alignout &
+    fi
+done
+wait
+
+
+
+
 # Run mango #########################################################
 mkdir -p $prefix/mango
+
+# Generate symbolic links for the sam files.
+ln -s `pwd`/$align1 ${prefix}/mango/mango_1.same.sam
+ln -s `pwd`/$align2 ${prefix}/mango/mango_2.same.sam
+
 Rscript mango/mango/mango.R --bedtoolspath bedtools/bedtools2/bin/bedtools \
                             --bowtiepath bowtie/bowtie-1.1.2/bowtie \
                             --fastq1 $fastq1 \
